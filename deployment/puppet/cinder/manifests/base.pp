@@ -24,10 +24,10 @@ class cinder::base (
   $qpid_port              = 5672,
   $qpid_userid            = 'nova',
   $package_ensure         = 'present',
-  $verbose                = 'False',
-  $debug                  = 'False',
+  $verbose                = false,
+  $debug                  = false,
   $use_syslog             = false,
-  $syslog_log_facility    = "LOCAL3",
+  $syslog_log_facility    = 'LOG_LOCAL3',
   $syslog_log_level = 'WARNING',
   $log_dir                = '/var/log/cinder',
 ) {
@@ -58,46 +58,27 @@ class cinder::base (
     require => Package['cinder'],
   }
 
-if $use_syslog and !$debug =~ /(?i)(true|yes)/ {
-  cinder_config {
-    'DEFAULT/log_config': value => "/etc/cinder/logging.conf";
-    'DEFAULT/log_file':   ensure=> absent;
-    'DEFAULT/log_dir':    ensure=> absent;
-    'DEFAULT/logfile':   ensure=> absent;
-    'DEFAULT/logdir':    ensure=> absent;
-    'DEFAULT/use_stderr': ensure=> absent;
-    'DEFAULT/use_syslog': value => true;
-    'DEFAULT/syslog_log_facility': value =>  $syslog_log_facility;
+  if $use_syslog and !$debug { #syslog and nondebug case
+    cinder_config {
+      'DEFAULT/log_config': value => "/etc/cinder/logging.conf";
+      'DEFAULT/use_syslog': value => true;
+      'DEFAULT/syslog_log_facility': value =>  $syslog_log_facility;
+    }
+    file { "cinder-logging.conf":
+      content => template('cinder/logging.conf.erb'),
+      path => "/etc/cinder/logging.conf",
+      require => File[$::cinder::params::cinder_conf],
+    }
+    # We must notify services to apply new logging rules
+    File['cinder-logging.conf'] ~> Service <| title == 'cinder-api' |>
+    File['cinder-logging.conf'] ~> Service <| title == 'cinder-volume' |>
+    File['cinder-logging.conf'] ~> Service <| title == 'cinder-scheduler' |>
+  } else { #other syslog debug or nonsyslog debug/nondebug cases
+    cinder_config {
+      'DEFAULT/logdir': value=> $log_dir;
+      'DEFAULT/use_syslog': value =>  false;
+    }
   }
-  file { "cinder-logging.conf":
-    content => template('cinder/logging.conf.erb'),
-    path => "/etc/cinder/logging.conf",
-    require => File[$::cinder::params::cinder_conf],
-  }
-}
-else {
-  cinder_config {
-    'DEFAULT/log_config': ensure=> absent;
-    'DEFAULT/use_syslog': ensure=> absent;
-    'DEFAULT/syslog_log_facility': ensure=> absent;
-    'DEFAULT/use_stderr': ensure=> absent;
-    'DEFAULT/logdir':value=> $log_dir;
-    'DEFAULT/logging_context_format_string':
-     value => '%(asctime)s %(levelname)s %(name)s [%(request_id)s %(user_id)s %(project_id)s] %(instance)s %(message)s';
-    'DEFAULT/logging_default_format_string':
-     value => '%(asctime)s %(levelname)s %(name)s [-] %(instance)s %(message)s';
-  }
-  # might be used for stdout logging instead, if configured
-  file { "cinder-logging.conf":
-    content => template('cinder/logging.conf-nosyslog.erb'),
-    path => "/etc/cinder/logging.conf",
-    require => File[$::cinder::params::cinder_conf],
-  }
-}
-  # We must notify services to apply new logging rules
-  File['cinder-logging.conf'] ~> Service<| title == "$::cinder::params::api_service" |>
-  File['cinder-logging.conf'] ~> Service<| title == "$::cinder::params::volume_service" |>
-  File['cinder-logging.conf'] ~> Service<| title == "$::cinder::params::scheduler_service" |>
 
   file { $::cinder::params::cinder_conf: }
   file { $::cinder::params::cinder_paste_api_ini: }

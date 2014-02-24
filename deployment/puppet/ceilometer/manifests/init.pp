@@ -8,9 +8,9 @@
 #  [*package_ensure*]
 #    ensure state for package. Optional. Defaults to 'present'
 #  [*verbose*]
-#    should the daemons log verbose messages. Optional. Defaults to 'False'
+#    should the daemons log verbose messages. Optional. Defaults to false
 #  [*debug*]
-#    should the daemons log debug messages. Optional. Defaults to 'False'
+#    should the daemons log debug messages. Optional. Defaults to false
 #  [*rabbit_host*]
 #    ip or hostname of the rabbit server. Optional. Defaults to '127.0.0.1'
 #  [*rabbit_port*]
@@ -35,10 +35,10 @@
 class ceilometer(
   $metering_secret     = false,
   $package_ensure      = 'present',
-  $verbose             = 'False',
-  $debug               = 'False',
+  $verbose             = false,
+  $debug               = false,
   $use_syslog          = false,
-  $syslog_log_facility = 'SYSLOG',
+  $syslog_log_facility = 'LOG_SYSLOG',
   $syslog_log_level    = 'WARNING',
   $queue_provider      = 'rabbitmq',
   $rabbit_host         = '127.0.0.1',
@@ -138,13 +138,10 @@ class ceilometer(
   }
 
   # Configure logging
-  if $use_syslog and !$debug =~ /(?i)(true|yes)/ {
+  if $use_syslog and !$debug { #syslog and nondebug case
     File['ceilometer-logging.conf'] -> Ceilometer_config['DEFAULT/log_config']
     ceilometer_config {
       'DEFAULT/log_config'         : value => '/etc/ceilometer/logging.conf';
-      'DEFAULT/log_file'           : ensure => absent;
-      'DEFAULT/log_dir'            : ensure => absent;
-      'DEFAULT/use_stderr'         : ensure => absent;
       'DEFAULT/use_syslog'         : value => true;
       'DEFAULT/syslog_log_facility': value => $syslog_log_facility;
     }
@@ -152,30 +149,15 @@ class ceilometer(
       content => template('ceilometer/logging.conf.erb'),
       path    => '/etc/ceilometer/logging.conf',
     }
-  }
-  else {
+    # We must notify services to apply new logging rules
+    File['ceilometer-logging.conf'] ~> Service <| title == 'ceilometer-api' |>
+    File['ceilometer-logging.conf'] ~> Service <| title == 'ceilometer-collector' |>
+    File['ceilometer-logging.conf'] ~> Service <| title == 'ceilometer-agent-central' |>
+    File['ceilometer-logging.conf'] ~> Service <| title == 'ceilometer-agent-compute' |>
+  } else { #other syslog debug or nonsyslog debug/nondebug cases
     ceilometer_config {
-      'DEFAULT/log_config': ensure=> absent;
-      'DEFAULT/use_syslog': ensure=> absent;
-      'DEFAULT/syslog_log_facility': ensure=> absent;
-      'DEFAULT/use_stderr': ensure=> absent;
       'DEFAULT/log_dir': value => $::ceilometer::params::log_dir;
-      'DEFAULT/logging_context_format_string':
-       value => '%(asctime)s %(levelname)s %(name)s [%(request_id)s %(user_id)s %(project_id)s] %(instance)s %(message)s';
-      'DEFAULT/logging_default_format_string':
-       value => '%(asctime)s %(levelname)s %(name)s [-] %(instance)s %(message)s';
-    }
-    # might be used for stdout logging instead, if configured
-    file { 'ceilometer-logging.conf':
-      content => template('ceilometer/logging.conf-nosyslog.erb'),
-      path    => '/etc/ceilometer/logging.conf',
+      'DEFAULT/use_syslog': value =>  false;
     }
   }
-
-  # We must notify services to apply new logging rules
-  File['ceilometer-logging.conf'] ~> Service<| title == "$::ceilometer::params::api_service_name" |>
-  File['ceilometer-logging.conf'] ~> Service<| title == "$::ceilometer::params::collector_service_name" |>
-  File['ceilometer-logging.conf'] ~> Service<| title == "$::ceilometer::params::agent_central_service_name" |>
-  File['ceilometer-logging.conf'] ~> Service<| title == "$::ceilometer::params::agent_compute_service_name" |>
-
 }

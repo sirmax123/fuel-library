@@ -20,7 +20,7 @@
 # $django_verbose       True/False. enable/disables verbose logging (info level). defaults to false
 # $log_level            Syslog level would be used for logging. If Verbose -> INFO, Debug -> DEBUG, otherwise -> the value given
 # $api_result_limit     max number of Swift containers/objects to display on a single page
-# $use_syslog           Redirect all apache logging to syslog. Required for FUEL-WEB.
+# $use_syslog           Redirect all apache logging to syslog. Required for FUEL-UI. Defaults to false.
 #
 class horizon(
   $secret_key,
@@ -35,8 +35,8 @@ class horizon(
   $keystone_port         = 5000,
   $keystone_scheme       = 'http',
   $keystone_default_role = 'Member',
-  $django_debug          = 'False',
-  $django_verbose        = 'False',
+  $django_debug          = false,
+  $django_verbose        = false,
   $api_result_limit      = 1000,
   $http_port             = 80,
   $https_port            = 443,
@@ -78,10 +78,20 @@ class horizon(
     mode    => '0644',
   }
 
-  file {'/usr/share/openstack-dashboard/':
-    recurse   => true,
-    subscribe => Package['dashboard']
+  $dashboard_directory = '/usr/share/openstack-dashboard/'
+
+  file { $dashboard_directory :
+    ensure => directory,
   }
+
+  exec { 'chown_dashboard' :
+    command     => "chown -R ${wsgi_user}:${wsgi_group} ${dashboard_directory}",
+    path        => [ '/usr/sbin', '/usr/bin', '/sbin', '/bin' ],
+    refreshonly => true,
+    provider    => 'shell',
+  }
+
+  Package['dashboard'] -> File[$dashboard_directory] ~> Exec['chown_dashboard']
 
   case $use_ssl {
     'exist': { # SSL certificate already exists
@@ -103,7 +113,7 @@ class horizon(
   if $generate_sslcert_names {
     $sslcert_pair = regsubst([$::horizon::params::ssl_cert_file,
                               $::horizon::params::ssl_key_file],
-                        '(.+\/).+(\..+)', "\1${::domain}\2")
+                        '(.+\/).+(\..+)', "\\1${::domain}\\2")
 
     $ssl_cert_file = $sslcert_pair[0]
     $ssl_key_file  = $sslcert_pair[1]
@@ -153,6 +163,26 @@ class horizon(
     notify  => Service['httpd']
   }
 
+  file { $::horizon::params::dashboard_http_conf_file:
+    content => template('horizon/openstack-dashboard.conf.erb'),
+    mode    => '0644',
+    notify  => Service['httpd'],
+    require => [
+        Package['dashboard'],
+        File[$::horizon::params::apache_confdir]
+    ]
+  }
+
+  file { $::horizon::params::apache_tuning_file:
+    content => template('horizon/zzz_performance_tuning.conf.erb'),
+    mode    => '0644',
+    notify  => Service['httpd'],
+    require => [
+        Package['dashboard'],
+        File[$::horizon::params::apache_confdir]
+    ]
+  }
+
   file { 'httpd_listen_config_file':
     path    => $::horizon::params::httpd_listen_config_file,
     content => template('horizon/ports.conf.erb'),
@@ -188,6 +218,15 @@ class horizon(
           ensure => present,
           before => Service['httpd'],
         }
+      }
+
+      file { '/etc/sysconfig/httpd':
+        mode    => 0644,
+        owner   => root,
+        group   => root,
+        content => template('horizon/redhat_sysconfig_httpd.erb'),
+        require => Package[$::horizon::params::http_service],
+        notify  => Service['httpd'],
       }
 
       augeas { 'remove_listen_directive':

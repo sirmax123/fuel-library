@@ -39,12 +39,13 @@
 #  $clean_minute - cron minute to launch glance-cache-cleaner.
 #  Optional. Default: 0
 #
-# $use_syslog - Rather or not service should log to syslog. Optional.
+#  $use_syslog - Rather or not service should log to syslog. Optional.
+#  Default: false
 #
 class glance::api(
   $keystone_password,
-  $verbose           = 'False',
-  $debug             = 'False',
+  $verbose           = false,
+  $debug             = false,
   $bind_host         = '0.0.0.0',
   $bind_port         = '9292',
   $backlog           = '4096',
@@ -63,7 +64,7 @@ class glance::api(
   $sql_idle_timeout  = '3600',
   $sql_connection    = 'sqlite:///var/lib/glance/glance.sqlite',
   $use_syslog        = false,
-  $syslog_log_facility = 'LOCAL2',
+  $syslog_log_facility = 'LOG_LOCAL2',
   $syslog_log_level  = 'WARNING',
   $prune_hour        = 0,
   $prune_minute      = 0,
@@ -118,14 +119,9 @@ class glance::api(
     include "glance::notify::${notify_mech}"
   }
 
-  if $use_syslog and !$debug =~ /(?i)(true|yes)/ {
+  if $use_syslog and !$debug { #syslog and nondebug case
     glance_api_config {
       'DEFAULT/log_config': value => "/etc/glance/logging.conf";
-      'DEFAULT/log_file': ensure=> absent;
-      'DEFAULT/log_dir': ensure=> absent;
-      'DEFAULT/logfile':   ensure=> absent;
-      'DEFAULT/logdir':    ensure=> absent;
-      'DEFAULT/use_stderr':  ensure=> absent;
       'DEFAULT/use_syslog':  value => true;
       'DEFAULT/syslog_log_facility': value =>  $syslog_log_facility;
     }
@@ -133,28 +129,16 @@ class glance::api(
       file {"glance-logging.conf":
         content => template('glance/logging.conf.erb'),
         path => "/etc/glance/logging.conf",
+        notify => Service['glance-api'],
       }
     }
-  } else {
+  } else {  #other syslog debug or nonsyslog debug/nondebug cases
     glance_api_config {
       'DEFAULT/log_config': ensure=> absent;
-      'DEFAULT/use_syslog': ensure=> absent;
-      'DEFAULT/syslog_log_facility': ensure=> absent;
-      'DEFAULT/use_stderr': ensure=> absent;
       'DEFAULT/log_file':value=> $log_file;
-      'DEFAULT/logging_context_format_string':
-        value => '%(asctime)s %(levelname)s %(name)s [%(request_id)s %(user_id)s %(project_id)s] %(instance)s %(message)s';
-      'DEFAULT/logging_default_format_string':
-        value => '%(asctime)s %(levelname)s %(name)s [-] %(instance)s %(message)s';
+      'DEFAULT/use_syslog': value =>  false;
     }
-    # might be used for stdout logging instead, if configured
-    if !defined(File["glance-logging.conf"]) {
-      file {"glance-logging.conf":
-        content => template('glance/logging.conf-nosyslog.erb'),
-        path => "/etc/glance/logging.conf",
-      }
-    }
-  }
+  } #end if
 
   # basic service config
   glance_api_config {

@@ -94,12 +94,14 @@ class osnailyfacter::cluster_ha {
 
   $vips = { # Do not convert to ARRAY, It can't work in 2.7
     public_old => {
-      nic    => $::public_int,
-      ip     => $::fuel_settings['public_vip'],
+      nic          => $::public_int,
+      ip           => $::fuel_settings['public_vip'],
+      cidr_netmask => '32',
     },
     management_old => {
-      nic    => $::internal_int,
-      ip     => $::fuel_settings['management_vip'],
+      nic          => $::internal_int,
+      ip           => $::fuel_settings['management_vip'],
+      cidr_netmask => '32',
     },
   }
 
@@ -186,7 +188,7 @@ class osnailyfacter::cluster_ha {
     if !$::fuel_settings['swift_partition'] {
       $swift_partition = '/var/lib/glance/node'
     }
-    $swift_proxies            = $controller_storage_addresses
+    $swift_proxies            = $controllers
     $swift_local_net_ip       = $::storage_address
     $master_swift_proxy_nodes = filter_nodes($nodes_hash,'role','primary-controller')
     $master_swift_proxy_ip    = $master_swift_proxy_nodes[0]['internal_address']
@@ -198,7 +200,7 @@ class osnailyfacter::cluster_ha {
       $primary_proxy = false
     }
   } elsif ($storage_hash['objects_ceph']) {
-    $rgw_balancers = $controller_storage_addresses
+    $rgw_servers = $controllers
   }
 
 
@@ -206,11 +208,10 @@ class osnailyfacter::cluster_ha {
     'vlan_start'     => $vlan_start,
   }
 
-  $verbose = true
-
-  if !$::fuel_settings['debug'] {
-    $debug = false
-  }
+  # from site.pp top scope
+  $use_syslog = $::use_syslog
+  $verbose = $::verbose
+  $debug = $::debug
 
   if $::fuel_settings['role'] == 'primary-controller' {
     $primary_controller = true
@@ -232,6 +233,7 @@ class osnailyfacter::cluster_ha {
     class {'osnailyfacter::apache_api_proxy':}
 
     class { 'openstack::controller_ha':
+      controllers                   => $controllers,
       controller_public_addresses   => $controller_public_addresses,
       controller_internal_addresses => $controller_internal_addresses,
       internal_address              => $internal_address,
@@ -247,8 +249,8 @@ class osnailyfacter::cluster_ha {
       num_networks                  => $num_networks,
       network_size                  => $network_size,
       network_config                => $network_config,
-      debug                         => $debug ? { 'true'=>true, true=>true, default=>false },
-      verbose                       => $verbose ? { 'true'=>true, true=>true, default=>false },
+      debug                         => $debug,
+      verbose                       => $verbose,
       queue_provider                => $::queue_provider,
       qpid_password                 => $rabbit_hash[password],
       qpid_user                     => $rabbit_hash[user],
@@ -273,7 +275,7 @@ class osnailyfacter::cluster_ha {
       export_resources              => false,
       glance_backend                => $glance_backend,
       swift_proxies                 => $swift_proxies,
-      rgw_balancers                 => $rgw_balancers,
+      rgw_servers                   => $rgw_servers,
       quantum                       => $::use_quantum,
       quantum_config                => $quantum_config,
       quantum_network_node          => $::use_quantum,
@@ -298,7 +300,7 @@ class osnailyfacter::cluster_ha {
       galera_nodes                  => $controller_nodes,
       custom_mysql_setup_class      => $custom_mysql_setup_class,
       mysql_skip_name_resolve       => true,
-      use_syslog                    => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+      use_syslog                    => $use_syslog,
       syslog_log_level              => $syslog_log_level,
       syslog_log_facility_glance    => $syslog_log_facility_glance,
       syslog_log_facility_cinder    => $syslog_log_facility_cinder,
@@ -327,15 +329,9 @@ class osnailyfacter::cluster_ha {
       include osnailyfacter::test_controller
 
       class { '::cluster': stage => 'corosync_setup' } ->
-      class { 'virtual_ips':
-        stage => 'corosync_setup'
-      }
-      include ::haproxy::params
-      class { 'cluster::haproxy':
-        global_options   => merge($::haproxy::params::global_options, {'log' => "/dev/log local0"}),
-        defaults_options => merge($::haproxy::params::defaults_options, {'mode' => 'http'}),
-        stage            => 'cluster_head',
-      }
+      class { 'virtual_ips': stage => 'corosync_setup' }
+
+      class { 'cluster::haproxy': haproxy_maxconn => '16000' }
 
       class { compact_controller: }
       if ($use_swift) {
@@ -351,8 +347,8 @@ class osnailyfacter::cluster_ha {
           master_swift_proxy_ip => $master_swift_proxy_ip,
           sync_rings            => ! $primary_proxy,
           syslog_log_level      => $syslog_log_level,
-          debug                 => $debug ? { 'true' => true, true => true, default=> false },
-          verbose               => $verbose ? { 'true' => true, true => true, default=> false },
+          debug                 => $debug,
+          verbose               => $verbose,
         }
         if $primary_proxy {
           ring_devices {'all': storages => $controllers }
@@ -374,8 +370,8 @@ class osnailyfacter::cluster_ha {
           swift_local_net_ip      => $swift_local_net_ip,
           master_swift_proxy_ip   => $master_swift_proxy_ip,
           syslog_log_level        => $syslog_log_level,
-          debug                   => $debug ? { 'true' => true, true => true, default=> false },
-          verbose                 => $verbose ? { 'true' => true, true => true, default=> false },
+          debug                   => $debug,
+          verbose                 => $verbose,
         }
         class { 'swift::keystone::auth':
           password         => $swift_hash[user_password],
@@ -390,7 +386,7 @@ class osnailyfacter::cluster_ha {
       nova_config { 'DEFAULT/compute_scheduler_driver':  value => $::fuel_settings['compute_scheduler_driver'] }
 
       if ! $::use_quantum {
-        nova_floating_range{ $floating_ips_range:
+        nova_floating_range { $floating_ips_range:
           ensure          => 'present',
           pool            => 'nova',
           username        => $access_hash[user],
@@ -400,7 +396,7 @@ class osnailyfacter::cluster_ha {
           authtenant_name => $access_hash[tenant],
           api_retries     => 10,
         }
-        Class[nova::api] -> Nova_floating_range <| |>
+        Class['nova::api', 'openstack::ha::nova'] -> Nova_floating_range <| |>
       }
       if ($::use_ceph){
         Class['openstack::controller'] -> Class['ceph']
@@ -410,18 +406,24 @@ class osnailyfacter::cluster_ha {
 
       if $savanna_hash['enabled'] {
         class { 'savanna' :
-          savanna_api_host          => $controller_node_address,
+          savanna_api_host            => $controller_node_address,
 
-          savanna_db_password       => $savanna_hash['db_password'],
-          savanna_db_host           => $controller_node_address,
+          savanna_db_password         => $savanna_hash['db_password'],
+          savanna_db_host             => $controller_node_address,
 
-          savanna_keystone_host     => $controller_node_address,
-          savanna_keystone_user     => 'savanna',
-          savanna_keystone_password => $savanna_hash['user_password'],
-          savanna_keystone_tenant   => 'services',
+          savanna_keystone_host       => $controller_node_address,
+          savanna_keystone_user       => 'savanna',
+          savanna_keystone_password   => $savanna_hash['user_password'],
+          savanna_keystone_tenant     => 'services',
 
-          use_neutron               => $::use_quantum,
-          use_floating_ips          => $::fuel_settings['auto_assign_floating_ip'],
+          use_neutron                 => $::use_quantum,
+          use_floating_ips            => $::fuel_settings['auto_assign_floating_ip'],
+
+          syslog_log_facility_savanna => $syslog_log_facility_savanna,
+          syslog_log_level            => $syslog_log_level,
+          debug                       => $debug,
+          verbose                     => $verbose,
+          use_syslog                  => $use_syslog,
         }
       }
         #FIXME: Disable heat for Red Hat OpenStack 3.0
@@ -430,18 +432,23 @@ class osnailyfacter::cluster_ha {
             pacemaker              => true,
             external_ip            => $controller_node_public,
 
-            heat_keystone_host     => $controller_node_address,
-            heat_keystone_user     => 'heat',
-            heat_keystone_password => 'heat',
-            heat_keystone_tenant   => 'services',
+            keystone_host     => $controller_node_address,
+            keystone_user     => 'heat',
+            keystone_password => 'heat',
+            keystone_tenant   => 'services',
 
-            heat_rabbit_host       => $controller_node_address,
-            heat_rabbit_login      => $rabbit_hash['user'],
-            heat_rabbit_password   => $rabbit_hash['password'],
-            heat_rabbit_port       => '5672',
+            rabbit_host       => $controller_node_address,
+            rabbit_login      => $rabbit_hash['user'],
+            rabbit_password   => $rabbit_hash['password'],
+            rabbit_port       => '5672',
 
-            heat_db_host           => $controller_node_address,
-            heat_db_password       => $heat_hash['db_password'],
+            db_host           => $controller_node_address,
+            db_password       => $heat_hash['db_password'],
+
+            debug               => $debug,
+            verbose             => $verbose,
+            use_syslog          => $use_syslog,
+            syslog_log_facility => $syslog_log_facility_heat,
           }
       }
 
@@ -458,11 +465,17 @@ class osnailyfacter::cluster_ha {
           murano_db_password       => $murano_hash['db_password'],
 
           murano_keystone_host     => $controller_node_address,
+          murano_metadata_host     => $controller_node_address,
           murano_keystone_user     => 'murano',
           murano_keystone_password => $murano_hash['user_password'],
           murano_keystone_tenant   => 'services',
 
           use_neutron              => $::use_quantum,
+
+          use_syslog               => $::fuel_settings['use_syslog'],
+          debug                    => $debug,
+          verbose                  => $verbose,
+          syslog_log_facility      => $syslog_log_facility_murano,
         }
 
        Class['heat'] -> Class['murano']
@@ -498,8 +511,8 @@ class osnailyfacter::cluster_ha {
         glance_api_servers     => "${::fuel_settings['management_vip']}:9292",
         vncproxy_host          => $::fuel_settings['public_vip'],
         vncserver_listen       => '0.0.0.0',
-        debug                  => $debug ? { 'true' => true, true => true, default=> false },
-        verbose                => $verbose ? { 'true' => true, true => true, default=> false },
+        debug                  => $debug,
+        verbose                => $verbose,
         cinder_volume_group    => "cinder",
         vnc_enabled            => true,
         manage_volumes         => $manage_volumes,
@@ -516,7 +529,7 @@ class osnailyfacter::cluster_ha {
         db_host                => $::fuel_settings['management_vip'],
         quantum                => $::use_quantum,
         quantum_config         => $quantum_config,
-        use_syslog             => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+        use_syslog             => $use_syslog,
         syslog_log_level       => $syslog_log_level,
         syslog_log_facility    => $syslog_log_facility_nova,
         syslog_log_facility_neutron => $syslog_log_facility_neutron,
@@ -596,9 +609,9 @@ class osnailyfacter::cluster_ha {
         cinder_user_password => $cinder_hash[user_password],
         syslog_log_facility  => $syslog_log_facility_cinder,
         syslog_log_level     => $syslog_log_level,
-        debug                => $debug ? { 'true' => true, true => true, default => false },
-        verbose              => $verbose ? { 'true' => true, true => true, default => false },
-        use_syslog           => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+        debug                 => $debug,
+        verbose               => $verbose,
+        use_syslog            => $use_syslog,
       }
 #      class { "::rsyslog::client":
 #        log_local => true,

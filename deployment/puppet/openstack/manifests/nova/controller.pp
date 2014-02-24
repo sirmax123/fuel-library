@@ -45,6 +45,7 @@ class openstack::nova::controller (
   $multi_host                = false,
   $network_config            = {},
   $network_manager           = 'nova.network.manager.FlatDHCPManager',
+  $nova_quota_driver         = 'nova.quota.NoopQuotaDriver',
   # Quantum
   $quantum                   = false,
   $quantum_config            = {},
@@ -75,8 +76,8 @@ class openstack::nova::controller (
   $vnc_enabled               = true,
   # General
   $keystone_host             = '127.0.0.1',
-  $verbose                   = 'False',
-  $debug                     = 'False',
+  $verbose                   = false,
+  $debug                     = false,
   $enabled                   = true,
   $exported_resources        = true,
   $rabbit_nodes              = [$internal_address],
@@ -87,8 +88,8 @@ class openstack::nova::controller (
   $enabled_apis              = 'ec2,osapi_compute',
   $api_bind_address          = '0.0.0.0',
   $use_syslog                = false,
-  $syslog_log_facility       = 'LOCAL6',
-  $syslog_log_facility_neutron = 'LOCAL4',
+  $syslog_log_facility       = 'LOG_LOCAL6',
+  $syslog_log_facility_neutron = 'LOG_LOCAL4',
   $syslog_log_level = 'WARNING',
   $nova_rate_limits          = undef,
   $cinder                    = true
@@ -307,6 +308,7 @@ class openstack::nova::controller (
     enabled_apis      => $_enabled_apis,
     ensure_package    => $ensure_package,
     nova_rate_limits  => $nova_rate_limits,
+    nova_quota_driver => $nova_quota_driver,
     cinder            => $cinder
   }
 

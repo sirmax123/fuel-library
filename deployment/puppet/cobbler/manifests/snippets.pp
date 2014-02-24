@@ -32,7 +32,6 @@ class cobbler::snippets {
   cobbler_snippet {"ntp_to_masternode": }
   cobbler_snippet {"ntp_to_masternode_ubuntu": }
   cobbler_snippet {"dhclient_ignore_routers_opt": }
-  cobbler_snippet {"authorized_keys": }
   cobbler_snippet {"pre_install_network_config": }
   cobbler_snippet {"pre_install_partition": }
   cobbler_snippet {"pre_install_partition_lvm": }
@@ -57,17 +56,22 @@ class cobbler::snippets {
   cobbler_snippet {"post_install_network_config":}
   cobbler_snippet {"cinder_create_lvm_group":}
   cobbler_snippet {"cinder_create_lvm_group__ubuntu":}
+  cobbler_snippet {"centos_authorized_keys": }
   cobbler_snippet {"centos_blacklist_i2c_piix4":}
   cobbler_snippet {"centos_static_net":}
+  cobbler_snippet {"ubuntu_authorized_keys":}
   cobbler_snippet {"ubuntu_blacklist_i2c_piix4":}
   cobbler_snippet {"ubuntu_disable_pxe":}
   cobbler_snippet {"ubuntu_packages":}
   cobbler_snippet {"ubuntu_puppet_config":}
   cobbler_snippet {"ubuntu_mcollective_config":}
   cobbler_snippet {"ubuntu_network":}
+  cobbler_snippet {"ubuntu_network_console_and_syslog":}
   cobbler_snippet {"ubuntu_partition":}
   cobbler_snippet {"ubuntu_partition_late":}
   cobbler_snippet {"ubuntu_static_net":}
+  cobbler_snippet {"anaconda_ssh_console":}
+  cobbler_snippet {'kernel_ml_if_enabled':}
 
   case $operatingsystem {
     /(?i)(debian|ubuntu)/:  {

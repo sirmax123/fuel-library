@@ -30,8 +30,10 @@
 #   Defaults to false.
 # [network_config] Hash that can be used to pass implementation specifc
 #   network settings. Optioal. Defaults to {}
-# [verbose] Rather to print more verbose (INFO+) output. If non verbose and non debug, would give syslog_log_level (default is WARNING) output. Optional. Defaults to false.
-# [debug] Rather to print even more verbose (DEBUG+) output. If true, would ignore verbose option. Optional. Defaults to false.
+# [verbose] Rather to print more verbose (INFO+) output. If non verbose and non debug, would give
+# syslog_log_level (default is WARNING) output. Optional. Defaults to false.
+# [debug] Rather to print even more verbose (DEBUG+) output. If true, would ignore verbose option.
+#   Optional. Defaults to false.
 # [export_resources] Rather to export resources.
 # Horizon related config - assumes puppetlabs-horizon code
 # [secret_key]          secret key to encode cookies, …
@@ -46,7 +48,7 @@
 # [horizon_app_links]     array as in '[ ["Nagios","http://nagios_addr:port/path"],["Ganglia","http://ganglia_addr"] ]'
 # [enabled] Whether services should be enabled. This parameter can be used to
 #   implement services in active-passive modes for HA. Optional. Defaults to true.
-# [use_syslog] Rather or not service should log to syslog. Optional.
+# [use_syslog] Rather or not service should log to syslog. Optional. Defaults to false.
 # [syslog_log_facility] Facility for syslog, if used. Optional. Note: duplicating conf option
 #       wouldn't have been used, but more powerfull rsyslog features managed via conf template instead
 # [syslog_log_level] logging level for non verbose and non debug mode. Optional.
@@ -156,8 +158,8 @@ class openstack::controller (
   $cinder                  = true,
   $horizon_app_links       = undef,
   # General
-  $verbose                 = 'False',
-  $debug                   = 'False',
+  $verbose                 = false,
+  $debug                   = false,
   $export_resources        = true,
   # if the cinder management components should be installed
   $cinder_user_password    = 'cinder_user_pass',
@@ -186,11 +188,11 @@ class openstack::controller (
   $nv_physical_volume      = undef,
   $use_syslog              = false,
   $syslog_log_level = 'WARNING',
-  $syslog_log_facility_glance   = 'LOCAL2',
-  $syslog_log_facility_cinder   = 'LOCAL3',
-  $syslog_log_facility_neutron  = 'LOCAL4',
-  $syslog_log_facility_nova     = 'LOCAL6',
-  $syslog_log_facility_keystone = 'LOCAL7',
+  $syslog_log_facility_glance   = 'LOG_LOCAL2',
+  $syslog_log_facility_cinder   = 'LOG_LOCAL3',
+  $syslog_log_facility_neutron  = 'LOG_LOCAL4',
+  $syslog_log_facility_nova     = 'LOG_LOCAL6',
+  $syslog_log_facility_keystone = 'LOG_LOCAL7',
   $horizon_use_ssl         = false,
   $nova_rate_limits        = undef,
   $cinder_rate_limits      = undef,
@@ -334,6 +336,12 @@ class openstack::controller (
     $enabled_apis = 'ec2,osapi_compute,osapi_volume'
   }
 
+  if $::fuel_settings['nova_quota'] {
+    $nova_quota_driver = "nova.quota.DbQuotaDriver"
+  } else {
+    $nova_quota_driver = "nova.quota.NoopQuotaDriver"
+  }
+
   class { 'openstack::nova::controller':
     # Database
     db_host                 => $db_host,
@@ -367,6 +375,7 @@ class openstack::controller (
     nova_db_password        => $nova_db_password,
     nova_db_user            => $nova_db_user,
     nova_db_dbname          => $nova_db_dbname,
+    nova_quota_driver       => $nova_quota_driver,
     # AMQP
     queue_provider          => $queue_provider,
     # Rabbit

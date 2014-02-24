@@ -27,15 +27,17 @@ class mysql::server (
   $galera_node_address = undef,
   $galera_nodes = undef,
   $mysql_skip_name_resolve = false,
-  $use_syslog              = false,
   $server_id         = $mysql::params::server_id,
   $rep_user = 'replicator',
   $rep_pass = 'replicant666',
   $replication_roles = "SELECT, PROCESS, FILE, SUPER, REPLICATION CLIENT, REPLICATION SLAVE, RELOAD",
   $use_syslog              = false,
+  $initscript_file         = 'puppet:///modules/mysql/mysql-single.init',
+  $mysql_buffer_pool_size  = $::mysql::params::mysql_buffer_pool_size
+
 ) inherits mysql::params {
 
-  Exec {path => '/usr/bin:/bin:/usr/sbin:/sbin'}    
+  Exec {path => '/usr/bin:/bin:/usr/sbin:/sbin'}
   if ($custom_setup_class == undef) {
     include mysql
     Class['mysql::server'] -> Class['mysql::config']
@@ -58,8 +60,17 @@ class mysql::server (
      #ensure => $mysql::params::server_version,
      #require=> Package['mysql-shared'],
     }
+    if $::operatingsystem == 'RedHat' {
+      file { "/etc/init.d/mysqld":
+        ensure  => present,
+        source  => $initscript_file,
+        mode    => '0755',
+        owner   => 'root',
+      }
+      File['/etc/init.d/mysqld'] -> Service['mysql']
+    }
     Package[mysql-client] -> Package[mysql-server]
- 
+
     service { 'mysql':
       name     => $service_name,
       ensure   => $enabled ? { true => 'running', default => 'stopped' },
@@ -95,14 +106,14 @@ class mysql::server (
     package { 'mysql-server':
       name   => $package_name,
     } ->
-    exec { "create-mysql-table-if-missing": 
+    exec { "create-mysql-table-if-missing":
       command => "/usr/bin/mysql_install_db --datadir=$mysql::params::datadir --user=mysql && chown -R mysql:mysql $mysql::params::datadir",
       path => '/bin:/usr/bin:/sbin:/usr/sbin',
       unless => "test -d $mysql::params::datadir/mysql",
     }
 
 
- 
+
     Class['openstack::corosync'] -> Cs_resource["p_${service_name}"]
 
 #    #cs_rsc_defaults { "resource-stickiness":
@@ -116,11 +127,11 @@ class mysql::server (
       content => template('mysql/repl_create.sql.erb'),
       owner => 'root',
       group => 'root',
-      mode => 0644,
+      mode  => '0644',
     }
-  
+
     ### Start hacks
-    file { '/usr/lib/ocf/resource.d/heartbeat/mysql': 
+    file { '/usr/lib/ocf/resource.d/heartbeat/mysql':
       ensure  => present,
       source  => 'puppet:///modules/mysql/ocf-mysql',
       owner   => 'root',
@@ -144,7 +155,7 @@ class mysql::server (
          require => Install_ssh_keys['root_ssh_key_for_mysql'],
          unless  => "mysql -NBe 'show slave status;' | grep -q ${rep_user}",
       } ->
-      exec { 'copy_mysql_data_dir': 
+      exec { 'copy_mysql_data_dir':
          command => "rsync -e 'ssh -i /root/.ssh/id_rsa_mysql -o StrictHostKeyChecking=no' -vaz root@${existing_slave}:/var/lib/mysql/. /var/lib/mysql/.",
          unless  => "mysql -NBe 'show slave status;' | grep -q ${rep_user}",
       } ->
@@ -154,7 +165,7 @@ class mysql::server (
          #before  => Cs_shadow['mysql'],
       }
     }
-    ### end hacks 
+    ### end hacks
 
     cs_shadow { 'mysql': cib => 'mysql' } ->
     cs_resource { "p_${service_name}":
@@ -194,11 +205,11 @@ class mysql::server (
     }
 
     #Tie vip__management_old to p_mysqld
-    cs_colocation { 'mysql_to_internal-vip': 
+    cs_colocation { 'mysql_to_internal-vip':
       primitives => ['vip__management_old',"master_p_${service_name}:Master"],
       score      => 'INFINITY',
       require    => [Cs_resource["p_${service_name}"], Cs_commit['mysql']],
-    } 
+    }
 
   }
   elsif ($custom_setup_class == 'galera')  {
@@ -213,7 +224,7 @@ class mysql::server (
     }
 #    require($galera_class)
   }
-  
+
    else {
     require($custom_setup_class)
   }

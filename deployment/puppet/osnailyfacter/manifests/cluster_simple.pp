@@ -114,11 +114,10 @@ class osnailyfacter::cluster_simple {
   $multi_host = true
   Exec { logoutput => true }
 
-  $verbose = true
-
-  if !$::fuel_settings['debug'] {
-   $debug = false
-  }
+  # from site.pp top scope
+  $use_syslog = $::use_syslog
+  $verbose = $::verbose
+  $debug = $::debug
 
   # Determine who should get the volume service
   if ($::fuel_settings['role'] == 'cinder' or
@@ -169,8 +168,8 @@ class osnailyfacter::cluster_simple {
         num_networks            => $::use_quantum ? { true=>false, default=>$novanetwork_params['num_networks'] },
         network_size            => $::use_quantum ? { true=>false, default=>$novanetwork_params['network_size'] },
         network_config          => $::use_quantum ? { true=>false, default=>$network_config },
-        debug                   => $debug ? { 'true'=>true, true=>true, default=>false },
-        verbose                 => $verbose ? { 'true'=>true, true=>true, default=>false },
+        debug                   => $debug,
+        verbose                 => $verbose,
         auto_assign_floating_ip => $::fuel_settings['auto_assign_floating_ip'],
         mysql_root_password     => $mysql_hash[root_password],
         admin_email             => $access_hash[email],
@@ -209,7 +208,7 @@ class osnailyfacter::cluster_simple {
         cinder_iscsi_bind_addr  => $cinder_iscsi_bind_addr,
         cinder_volume_group     => "cinder",
         manage_volumes          => $manage_volumes,
-        use_syslog              => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+        use_syslog              => $use_syslog,
         syslog_log_level        => $syslog_log_level,
         syslog_log_facility_glance  => $syslog_log_facility_glance,
         syslog_log_facility_cinder  => $syslog_log_facility_cinder,
@@ -226,8 +225,8 @@ class osnailyfacter::cluster_simple {
       nova_config { 'DEFAULT/compute_scheduler_driver': value => $::fuel_settings['compute_scheduler_driver'] }
       if $::use_quantum {
         class { '::openstack::neutron_router':
-          debug                 => $debug ? { 'true' => true, true => true, default=> false },
-          verbose               => $verbose ? { 'true' => true, true => true, default=> false },
+          debug                 => $debug,
+          verbose               => $verbose,
           # qpid_password         => $rabbit_hash[password],
           # qpid_user             => $rabbit_hash[user],
           # qpid_nodes            => [$controller_node_address],
@@ -272,40 +271,52 @@ class osnailyfacter::cluster_simple {
 
       if $savanna_hash['enabled'] {
         class { 'savanna' :
-          savanna_api_host          => $controller_node_address,
+          savanna_api_host            => $controller_node_address,
 
-          savanna_db_password       => $savanna_hash['db_password'],
-          savanna_db_host           => $controller_node_address,
+          savanna_db_password         => $savanna_hash['db_password'],
+          savanna_db_host             => $controller_node_address,
 
-          savanna_keystone_host     => $controller_node_address,
-          savanna_keystone_user     => 'savanna',
-          savanna_keystone_password => $savanna_hash['user_password'],
-          savanna_keystone_tenant   => 'services',
+          savanna_keystone_host       => $controller_node_address,
+          savanna_keystone_user       => 'savanna',
+          savanna_keystone_password   => $savanna_hash['user_password'],
+          savanna_keystone_tenant     => 'services',
 
-          use_neutron               => $::use_quantum,
-          use_floating_ips          => $::fuel_settings['auto_assign_floating_ip'],
+          use_neutron                 => $::use_quantum,
+          use_floating_ips            => $::fuel_settings['auto_assign_floating_ip'],
+
+          syslog_log_facility_savanna => $syslog_log_facility_savanna,
+          syslog_log_level            => $syslog_log_level,
+          debug                       => $debug,
+          verbose                     => $verbose,
+          use_syslog                  => $use_syslog,
         }
       }
-      #FIXME: Disable heat for Red Hat OpenStack 3.0
+
       if ($::operatingsystem != 'RedHat') {
         class { 'heat' :
           pacemaker              => false,
           external_ip            => $controller_node_public,
 
-          heat_keystone_host     => $controller_node_address,
-          heat_keystone_user     => 'heat',
-          heat_keystone_password => 'heat',
-          heat_keystone_tenant   => 'services',
+          keystone_host     => $controller_node_address,
+          keystone_user     => 'heat',
+          keystone_password => 'heat',
+          keystone_tenant   => 'services',
 
-          heat_rabbit_host       => $controller_node_address,
-          heat_rabbit_login      => $rabbit_hash['user'],
-          heat_rabbit_password   => $rabbit_hash['password'],
-          heat_rabbit_port       => '5672',
+          rabbit_host       => $controller_node_address,
+          rabbit_login      => $rabbit_hash['user'],
+          rabbit_password   => $rabbit_hash['password'],
+          rabbit_port       => '5672',
 
-          heat_db_host           => $controller_node_address,
-          heat_db_password       => $heat_hash['db_password'],
+          db_host           => $controller_node_address,
+          db_password       => $heat_hash['db_password'],
+
+          debug               => $debug,
+          verbose             => $verbose,
+          use_syslog          => $use_syslog,
+          syslog_log_facility => $syslog_log_facility_heat,
         }
       }
+
       if $murano_hash['enabled'] {
 
         class { 'murano' :
@@ -319,11 +330,17 @@ class osnailyfacter::cluster_simple {
           murano_db_password       => $murano_hash['db_password'],
 
           murano_keystone_host     => $controller_node_address,
+          murano_metadata_host     => $controller_node_address,
           murano_keystone_user     => 'murano',
           murano_keystone_password => $murano_hash['user_password'],
           murano_keystone_tenant   => 'services',
 
           use_neutron              => $::use_quantum,
+
+          use_syslog               => $::fuel_settings['use_syslog'],
+          debug                    => $debug,
+          verbose                  => $verbose,
+          syslog_log_facility      => $syslog_log_facility_murano,
         }
 
         Class['heat'] -> Class['murano']
@@ -375,9 +392,9 @@ class osnailyfacter::cluster_simple {
         cinder_volume_group    => "cinder",
         manage_volumes         => $manage_volumes,
         db_host                => $controller_node_address,
-        debug                  => $debug ? { 'true' => true, true => true, default=> false },
-        verbose                => $verbose ? { 'true' => true, true => true, default=> false },
-        use_syslog             => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+        debug                  => $debug,
+        verbose                => $verbose,
+        use_syslog             => $use_syslog,
         syslog_log_level       => $syslog_log_level,
         syslog_log_facility    => $syslog_log_facility_nova,
         syslog_log_facility_neutron => $syslog_log_facility_neutron,
@@ -441,9 +458,9 @@ class osnailyfacter::cluster_simple {
         cinder_user_password => $cinder_hash[user_password],
         syslog_log_facility  => $syslog_log_facility_cinder,
         syslog_log_level     => $syslog_log_level,
-        debug                => $debug ? { 'true' => true, true => true, default => false },
-        verbose              => $verbose ? { 'true' => true, true => true, default => false },
-        use_syslog           => $::fuel_settings['use_syslog'] ? { 'false'=>false, false=>false, default=>true },
+        debug                => $debug,
+        verbose              => $verbose,
+        use_syslog           => $use_syslog,
       }
     } #CINDER ENDS
 

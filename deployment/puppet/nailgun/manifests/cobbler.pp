@@ -122,7 +122,7 @@ class nailgun::cobbler(
 
   cobbler_profile { "centos-x86_64":
     kickstart => "/var/lib/cobbler/kickstarts/centos-x86_64.ks",
-    kopts => "biosdevname=0",
+    kopts => "biosdevname=0 sshd=1",
     distro => "centos-x86_64",
     ksmeta => "",
     menu => true,
@@ -181,6 +181,18 @@ class nailgun::cobbler(
 
   Exec["cobbler_system_add_default"] ~> Exec["nailgun_cobbler_sync"]
   Exec["cobbler_system_edit_default"] ~> Exec["nailgun_cobbler_sync"]
+
+  #TODO(mattymo): refactor this into cobbler module and use OS-dependent
+  #directories
+  file { ['/etc/httpd', '/etc/httpd/conf.d/']:
+    ensure => 'directory',
+  }
+  file { '/etc/httpd/conf.d/nailgun.conf':
+    content => template('nailgun/httpd_nailgun.conf.erb'),
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+  }
 
 }
 

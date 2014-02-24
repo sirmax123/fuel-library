@@ -51,6 +51,10 @@ class MrntNeutron
     @fuel_config[:database_vip]  ||  @fuel_config[:management_vip]
   end
 
+  def get_tenant()
+    @fuel_config[:access][:tenant] || "admin"
+  end
+
   # classmethod
   def self.get_amqp_config(cfg)
     rv = cfg.clone()
@@ -133,6 +137,9 @@ class MrntNeutron
   end
 
   def get_amqp_passwd()
+    if @fuel_config[:rabbit].nil? || @fuel_config[:rabbit].empty?
+      raise(Puppet::ParseError, "AMQP password not given!!!")
+    end
     @fuel_config[:rabbit][:password]
   end
 
@@ -150,7 +157,7 @@ class MrntNeutron
   def get_default_routers()
     {
       :router04 => {
-        :tenant => 'admin',
+        :tenant => get_tenant(),
         :virtual => false,  # Virtual router should not be create
         :external_network => "net04_ext",
         :internal_networks => ["net04"],
@@ -158,13 +165,32 @@ class MrntNeutron
     }
   end
 
-  def get_default_networks()
+  def get_phys_nets(tun_mode, net_hash)
+    return net_hash if net_hash
+    rv = {
+      :physnet1 => {
+        :bridge => get_bridge_name('public'),
+        :vlan_range => nil,
+      }
+    }
+    if ! tun_mode
+      rv[:physnet2] = {
+        :bridge => get_bridge_name('private'),
+        :vlan_range => "3000:4094",
+      }
+    end
+    return rv
+  end
+
+  def get_predefined_networks(tun_mode, net_hash)
+    return net_hash if net_hash
     net_ext = "10.100.100"
     net_int = "192.168.111"
-    {
+    int_physnet = tun_mode  ?  nil  :  'physnet2'
+    return {
       :net04_ext => {
         :shared => false,
-        :tenant => 'admin',
+        :tenant => get_tenant(),
         :L2 => {
           :router_ext   => true,
           :network_type => 'flat',
@@ -181,11 +207,11 @@ class MrntNeutron
       },
       :net04 => {
         :shared => false,
-        :tenant => 'admin',
+        :tenant => get_tenant(),
         :L2 => {
           :router_ext   => false,
           :network_type => 'gre', # or vlan
-          :physnet      => 'physnet2',
+          :physnet      => int_physnet,
           :segment_id   => nil,
         },
         :L3 => {
@@ -260,18 +286,6 @@ class MrntNeutron
         :mac_generation_retries => 32,
         :segmentation_type => "gre",
         :tunnel_id_ranges => "3000:65535",
-        :phys_nets => {
-          :physnet1 => {
-            :bridge => get_bridge_name('public'),
-            #:interface => 'eth2',
-            :vlan_range => nil,
-          },
-          :physnet2 => {
-            :bridge => get_bridge_name('private'),
-            #:interface => 'eth3',
-            :vlan_range => "3000:4094",
-          },
-        },
         :phys_bridges => nil, # will be calculated later from :phys_nets
         :bridge_mappings => nil, # will be calculated later from :phys_nets
         :network_vlan_ranges => nil, # will be calculated later from :phys_nets
@@ -300,7 +314,6 @@ class MrntNeutron
         },
       },
       :predefined_routers => get_default_routers(),
-      :predefined_networks => get_default_networks(),
       :root_helper => "sudo neutron-rootwrap /etc/neutron/rootwrap.conf",
       :polling_interval => 2,
     }
@@ -322,28 +335,45 @@ class MrntNeutron
 
   def generate_config()
     @neutron_config = _generate_config(generate_default_neutron_config(), @neutron_config_from_nailgun, [])
+    # prevent getters, like @neutron_config_from_nailgun[:L2][:XXX] from errors
+    @neutron_config_from_nailgun[:L2] ||= {}
+    @neutron_config_from_nailgun[:L3] ||= {}
+    # calculate some sections if not given
     @neutron_config[:database][:url] ||= MrntNeutron.get_database_url(@neutron_config[:database])
     @neutron_config[:keystone][:auth_url] ||= MrntNeutron.get_keystone_auth_url(@neutron_config[:keystone])
     @neutron_config[:server][:api_url] ||= get_neutron_srv_api_url(@neutron_config[:server])
-    @neutron_config[:L2][:network_vlan_ranges] = MrntNeutron.get_network_vlan_ranges(@neutron_config[:L2])
-    @neutron_config[:L2][:bridge_mappings] = MrntNeutron.get_bridge_mappings(@neutron_config[:L2])
-    @neutron_config[:L2][:phys_bridges] = MrntNeutron.get_phys_bridges(@neutron_config[:L2])
     @neutron_config[:amqp] ||= MrntNeutron.get_amqp_config(@neutron_config[:amqp])
+    # calculate tunneling value from segm.type
     if [:gre, :vxlan, :lisp].include? @neutron_config[:L2][:segmentation_type].downcase.to_sym
       @neutron_config[:L2][:enable_tunneling] = true
     else
       @neutron_config[:L2][:enable_tunneling] = false
       @neutron_config[:L2][:tunnel_id_ranges] = nil
     end
+    # get amqp password from main config if for Neutron not given.
     if @neutron_config[:amqp][:passwd].nil?
       @neutron_config[:amqp][:passwd] = get_amqp_passwd()
     end
+    @neutron_config[:predefined_networks] = get_predefined_networks(
+      @neutron_config[:L2][:enable_tunneling],
+      @neutron_config_from_nailgun[:predefined_networks]
+    )
+    @neutron_config[:L2][:phys_nets] = get_phys_nets(
+      @neutron_config[:L2][:enable_tunneling],
+      @neutron_config_from_nailgun[:L2][:phys_nets]
+    )
+    @neutron_config[:L2][:network_vlan_ranges] = MrntNeutron.get_network_vlan_ranges(@neutron_config[:L2])
+    @neutron_config[:L2][:bridge_mappings] = MrntNeutron.get_bridge_mappings(@neutron_config[:L2])
+    @neutron_config[:L2][:phys_bridges] = MrntNeutron.get_phys_bridges(@neutron_config[:L2])
     return @neutron_config
   end
 
   private
 
   def _generate_config(cfg_dflt, cfg_user, path)
+    if cfg_user.nil? or cfg_user.empty?
+      return Marshal.load(Marshal.dump(cfg_dflt))
+    end
     rv = {}
     cfg_dflt.each() do |k, v|
       # if v == nil && cfg_user[k] == nil
@@ -380,7 +410,9 @@ Puppet::Parser::Functions::newfunction(:sanitize_neutron_config, :type => :rvalu
   q_conf = MrntNeutron.new(self, given_config, argv[1])
   rv = q_conf.generate_config()
   # pUPPET not allow hashes with SYM keys. normalize keys
-  JSON.load(rv.to_json)
+  rv = JSON.load(rv.to_json)
+  Puppet::debug("-*- Actual Neutron config is: #{rv.to_yaml()}")
+  return rv
 end
 
 # vim: set ts=2 sw=2 et :

@@ -17,7 +17,6 @@ stage {'first': } ->
 stage {'openstack-custom-repo': } ->
 stage {'netconfig': } ->
 stage {'corosync_setup': } ->
-stage {'cluster_head': } ->
 stage {'openstack-firewall': } -> Stage['main']
 
 class begin_deployment ()
@@ -99,18 +98,20 @@ $debug = $::fuel_settings['debug']
 
 ### Syslog ###
 # Enable error messages reporting to rsyslog. Rsyslog must be installed in this case.
-$use_syslog = true
+$use_syslog = $::fuel_settings['use_syslog'] ? { default=>true }
 # Default log level would have been used, if non verbose and non debug
 $syslog_log_level             = 'ERROR'
 # Syslog facilities for main openstack services, choose any, may overlap if needed
 # local0 is reserved for HA provisioning and orchestration services,
 # local1 is reserved for openstack-dashboard
-$syslog_log_facility_glance   = 'LOCAL2'
-$syslog_log_facility_cinder   = 'LOCAL3'
-$syslog_log_facility_neutron  = 'LOCAL4'
-$syslog_log_facility_nova     = 'LOCAL6'
-$syslog_log_facility_keystone = 'LOCAL7'
-
+$syslog_log_facility_murano   = 'LOG_LOCAL0'
+$syslog_log_facility_glance   = 'LOG_LOCAL2'
+$syslog_log_facility_cinder   = 'LOG_LOCAL3'
+$syslog_log_facility_neutron  = 'LOG_LOCAL4'
+$syslog_log_facility_nova     = 'LOG_LOCAL6'
+$syslog_log_facility_keystone = 'LOG_LOCAL7'
+$syslog_log_facility_heat     = 'LOG_LOCAL0'
+$syslog_log_facility_savanna  = 'LOG_LOCAL0'
 
 $nova_rate_limits = {
   'POST' => 1000,
@@ -157,7 +158,7 @@ class os_common {
   }
 
   $base_syslog_rserver  = {
-    'remote_type' => 'udp',
+    'remote_type' => 'tcp',
     'server' => $base_syslog_hash['syslog_server'],
     'port' => $base_syslog_hash['syslog_port']
   }
@@ -192,16 +193,19 @@ class os_common {
       # should be true, if client is running at virtual node
       virtual        => str2bool($::is_virtual),
       # facilities
+      syslog_log_facility_murano   => $syslog_log_facility_murano,
+      syslog_log_facility_savanna  => $syslog_log_facility_savanna,
       syslog_log_facility_glance   => $syslog_log_facility_glance,
       syslog_log_facility_cinder   => $syslog_log_facility_cinder,
       syslog_log_facility_neutron  => $syslog_log_facility_neutron,
       syslog_log_facility_nova     => $syslog_log_facility_nova,
       syslog_log_facility_keystone => $syslog_log_facility_keystone,
+      syslog_log_facility_heat     => $syslog_log_facility_heat,
       # Rabbit doesn't support syslog directly, should be >= syslog_log_level,
       # otherwise none rabbit's messages would have gone to syslog
       rabbit_log_level => $syslog_log_level,
       # debug mode
-      debug          => $debug ? { 'true' => true, true => true, default=> false },
+      debug          => $debug,
     }
   }
 
@@ -242,6 +246,10 @@ class os_common {
     proto   => 'tcp',
     action  => 'accept',
     require => Class['openstack::firewall'],
+  }
+
+  class { 'puppet::pull' :
+    master_ip => $::fuel_settings['master_ip'],
   }
 } # OS_COMMON ENDS
 

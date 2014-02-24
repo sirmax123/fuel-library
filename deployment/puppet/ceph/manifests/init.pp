@@ -4,6 +4,12 @@ class ceph (
       # General settings
       $cluster_node_address = $::ipaddress, #This should be the cluster service address
       $primary_mon          = $::hostname, #This should be the first controller
+      $mon_hosts            = nodes_with_roles($::fuel_settings['nodes'],
+                                               ['primary-controller', 'controller', 'ceph-mon'],
+                                               'name'),
+      $mon_ip_addresses     = nodes_with_roles($::fuel_settings['nodes'],
+                                               ['primary-controller', 'controller', 'ceph-mon'],
+                                               'internal_address'),
       $osd_devices          = split($::osd_devices_list, ' '),
       $use_ssl              = false,
       $use_rgw              = false,
@@ -35,7 +41,7 @@ class ceph (
       $rgw_keystone_revocation_interval = $::ceph::rgw_use_pki ? { false => 1000000, default => 60},
       $rgw_data                         = '/var/lib/ceph/radosgw',
       $rgw_dns_name                     = "*.${::domain}",
-      $rgw_print_continue               = 'false',
+      $rgw_print_continue               = true,
       $rgw_nss_db_path                  = '/etc/ceph/nss',
 
       # Keystone settings

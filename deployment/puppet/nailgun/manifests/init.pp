@@ -92,7 +92,8 @@ class nailgun(
     # should be > 30M
     limitsize      => '100M',
     port           => '514',
-    proto          => 'udp',
+    # listen both TCP and UDP
+    proto          => 'both',
     # use date-rfc3339 timestamps
     show_timezone  => true,
     virtual        => str2bool($::is_virtual),
@@ -207,7 +208,7 @@ class nailgun(
   class { "nailgun::gateone":
     pip_opts => "${pip_index} ${pip_find_links}",
   }
-    
+
   class { "nailgun::puppetsync": }
 
   nailgun::sshkeygen { "/root/.ssh/id_rsa":

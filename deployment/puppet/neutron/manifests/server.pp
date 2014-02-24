@@ -64,6 +64,12 @@ class neutron::server (
   Service <| title == 'mysql' |> -> Service['neutron-server']
   Service <| title == 'haproxy' |> -> Service['neutron-server']
 
+  neutron_config {
+    'database/sql_connection':      value => $neutron_config['database']['url'];
+    'database/sql_max_retries':     value => $neutron_config['database']['reconnects'];
+    'database/reconnect_interval':  value => $neutron_config['database']['reconnect_interval'];
+  }
+
   neutron_api_config {
     'filter:authtoken/auth_url':          value => $neutron_config['keystone']['auth_url'];
     'filter:authtoken/auth_host':         value => $neutron_config['keystone']['auth_host'];
@@ -73,6 +79,8 @@ class neutron::server (
     'filter:authtoken/admin_user':        value => $neutron_config['keystone']['admin_user'];
     'filter:authtoken/admin_password':    value => $neutron_config['keystone']['admin_password'];
   }
+
+  anchor {'neutron-server-config-done':}
 
   File<| title=='neutron-logging.conf' |> ->
   service {'neutron-server':
@@ -84,31 +92,26 @@ class neutron::server (
     provider   => $::neutron::params::service_provider,
   }
 
+  anchor {'neutron-api-up':}
+
   Anchor['neutron-server'] ->
     Neutron_config<||> ->
       Neutron_api_config<||> ->
   Anchor['neutron-server-config-done'] ->
     Service['neutron-server'] ->
+  Anchor['neutron-api-up'] ->
   Anchor['neutron-server-done']
 
-  # if defined(Anchor['neutron-plugin-ovs-done']) {
-  #   Anchor['neutron-server-config-done'] ->
-  #     Anchor['neutron-plugin-ovs-done'] ->
-  #       Anchor['neutron-server-done']
-  # }
-
-  anchor {'neutron-server-config-done':}
+  Package[$server_package] -> class { 'neutron::quota': } -> Anchor['neutron-server-config-done']
 
   if $primary_controller {
-    Anchor['neutron-server-config-done'] ->
-    class { 'neutron::network::predefined_netwoks':
+    Anchor['neutron-api-up'] ->
+    class { 'neutron::network::predefined_networks':
       neutron_config => $neutron_config,
     } -> Anchor['neutron-server-done']
-    Service['neutron-server'] -> Class['neutron::network::predefined_netwoks']
   }
 
   anchor {'neutron-server-done':}
-  Anchor['neutron-server'] -> Anchor['neutron-server-done']
 }
 
 # vim: set ts=2 sw=2 et :
